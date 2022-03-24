@@ -35,7 +35,7 @@ def main(argv):
         bin/examine.py hide_and_seek my_policy.npz n_hiders=3 n_seekers=2 n_boxes=8 n_ramps=1
     """
     # names, kwargs = parse_arguments(argv)
-    names = ["examples/hide_and_seek_full.jsonnet", "hide_and_seek_full.npz"]
+    names = ["examples/hide_and_seek_full.jsonnet", "examples/hide_and_seek_full.npz"]
     env_name = names[0]
     core_dir = abspath(join(dirname(__file__), ".."))
     envs_dir = ("mae_envs/envs",)

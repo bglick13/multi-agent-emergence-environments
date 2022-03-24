@@ -2,6 +2,7 @@ import gym
 import numpy as np
 from copy import deepcopy
 from mae_envs.envs.base import Base
+from mae_envs.wrappers.agent_type import AgentType
 from mae_envs.wrappers.multi_agent import (
     SplitMultiAgentActions,
     SplitObservations,
@@ -142,7 +143,7 @@ class TrackStatWrapper(gym.Wrapper):
         return obs, rew, done, info
 
 
-class HideAndSeekRewardWrapper(gym.Wrapper):
+class SearchAndRescueRewardWrapper(gym.Wrapper):
     """
     Establishes hide and seek dynamics (see different reward types below). Defaults to first half
         of agents being hiders and second half seekers unless underlying environment specifies
@@ -158,87 +159,37 @@ class HideAndSeekRewardWrapper(gym.Wrapper):
         reward_scale (float): scales the reward by this factor
     """
 
-    def __init__(self, env, n_hiders, n_seekers, rew_type="selfish", reward_scale=1.0):
+    def __init__(
+        self, env, n_rescuers, n_seekers, rew_type="selfish", reward_scale=1.0
+    ):
         super().__init__(env)
         self.n_agents = self.unwrapped.n_agents
         self.rew_type = rew_type
-        self.n_hiders = n_hiders
+        self.n_rescuers = n_rescuers
         self.n_seekers = n_seekers
         self.reward_scale = reward_scale
         assert (
-            n_hiders + n_seekers == self.n_agents
+            n_rescuers + n_seekers + 1 == self.n_agents
         ), "n_hiders + n_seekers must equal n_agents"
 
-        self.metadata["n_hiders"] = n_hiders
+        self.metadata["n_rescuers"] = n_rescuers
         self.metadata["n_seekers"] = n_seekers
 
         # Agent names are used to plot agent-specific rewards on tensorboard
-        self.unwrapped.agent_names = [f"hider{i}" for i in range(self.n_hiders)] + [
-            f"seeker{i}" for i in range(self.n_seekers)
+        self.unwrapped.agent_names = [f"rescuer{i}" for i in range(self.n_rescuers)] + [
+            f"seeker{i}" for i in range(self.n_seekers) + ["lost_hiker"]
         ]
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
 
-        this_rew = np.ones((self.n_agents,))
-        this_rew[: self.n_hiders][
-            np.any(obs["mask_aa_obs"][self.n_hiders :, : self.n_hiders], 0)
-        ] = -1.0
-        this_rew[self.n_hiders :][
-            ~np.any(obs["mask_aa_obs"][self.n_hiders :, : self.n_hiders], 1)
-        ] = -1.0
-
-        if self.rew_type == "joint_mean":
-            this_rew[: self.n_hiders] = this_rew[: self.n_hiders].mean()
-            this_rew[self.n_hiders :] = this_rew[self.n_hiders :].mean()
-        elif self.rew_type == "joint_zero_sum":
-            this_rew[: self.n_hiders] = np.min(this_rew[: self.n_hiders])
-            this_rew[self.n_hiders :] = np.max(this_rew[self.n_hiders :])
-        elif self.rew_type == "selfish":
-            pass
-        else:
-            assert (
-                False
-            ), f"Hide and Seek reward type {self.rew_type} is not implemented"
+        this_rew = np.zeros((self.n_agents,))
+        if np.sum(obs["mask_aa_obs"][: self.n_rescuers, -1]) == self.n_rescuers:
+            this_rew = np.ones((self.n_agents,))
 
         this_rew *= self.reward_scale
         rew += this_rew
         return obs, rew, done, info
-
-
-class MaskUnseenAction(gym.Wrapper):
-    """
-    Masks a (binary) action with some probability if agent or any of its teammates was being observed
-    by opponents at any of the last n_latency time step
-
-    Args:
-        team_idx (int): Team index (e.g. 0 = hiders) of team whose actions are
-                        masked
-        action_key (string): key of action to be masked
-    """
-
-    def __init__(self, env, team_idx, action_key):
-        super().__init__(env)
-        self.team_idx = team_idx
-        self.action_key = action_key
-        self.n_agents = self.unwrapped.n_agents
-        self.n_hiders = self.metadata["n_hiders"]
-
-    def reset(self):
-        self.prev_obs = self.env.reset()
-        self.this_team = self.metadata["team_index"] == self.team_idx
-
-        return deepcopy(self.prev_obs)
-
-    def step(self, action):
-        is_caught = np.any(
-            self.prev_obs["mask_aa_obs"][self.n_hiders :, : self.n_hiders]
-        )
-        if is_caught:
-            action[self.action_key][self.this_team] = 0
-
-        self.prev_obs, rew, done, info = self.env.step(action)
-        return deepcopy(self.prev_obs), rew, done, info
 
 
 def quadrant_placement(grid, obj_size, metadata, random_state):
@@ -292,8 +243,7 @@ def make_env(
     floor_size=6.0,
     grid_size=30,
     door_size=2,
-    n_hiders=1,
-    n_seekers=1,
+    agent_types=None,
     max_n_agents=None,
     n_boxes=2,
     n_ramps=1,
@@ -325,7 +275,7 @@ def make_env(
     random_room_number=True,
     prob_outside_walls=1.0,
     n_lidar_per_agent=0,
-    visualize_lidar=True,
+    visualize_lidar=False,
     compress_lidar_scale=None,
     hiders_together_radius=None,
     seekers_together_radius=None,
@@ -351,7 +301,7 @@ def make_env(
     lock_radius_multiplier = lock_grab_radius / box_size
 
     env = Base(
-        n_agents=n_hiders + n_seekers,
+        n_agents=len(agent_types) + 1,
         n_substeps=n_substeps,
         horizon=horizon,
         floor_size=floor_size,
@@ -359,6 +309,9 @@ def make_env(
         action_lims=action_lims,
         deterministic_mode=deterministic_mode,
     )
+    n_rescuers = np.sum([1 for a in agent_types if a["rescuer"]])
+    n_seekers = np.sum([1 for a in agent_types if not a["rescuer"]])
+    n_lost_hiker = 1
 
     if scenario == "randomwalls":
         env.add_module(
@@ -388,9 +341,9 @@ def make_env(
 
             agent_placement_fn = [first_hider_placement] + [
                 close_to_first_hider_placement
-            ] * (n_hiders - 1)
+            ] * (n_rescuers - 1)
         else:
-            agent_placement_fn = [first_hider_placement] * n_hiders
+            agent_placement_fn = [first_hider_placement] * n_rescuers
 
         first_seeker_placement = uniform_placement
 
@@ -400,7 +353,7 @@ def make_env(
             env.metadata["seekers_together_radius"] = str_in_cells
 
             close_to_first_seeker_placement = close_to_other_object_placement(
-                "agent", n_hiders, "seekers_together_radius"
+                "agent", n_rescuers, "seekers_together_radius"
             )
 
             agent_placement_fn += [first_seeker_placement] + [
@@ -421,23 +374,24 @@ def make_env(
         )
         box_placement_fn = quadrant_placement
         ramp_placement_fn = uniform_placement
-        hider_placement = (
+        lost_hiker_placement = (
             uniform_placement
             if quadrant_game_hider_uniform_placement
             else quadrant_placement
         )
-        agent_placement_fn = [hider_placement] * n_hiders + [
-            outside_quadrant_placement
-        ] * n_seekers
+        agent_placement_fn = [outside_quadrant_placement] * (n_seekers + n_rescuers) + [
+            lost_hiker_placement
+        ]
     else:
         raise ValueError(f"Scenario {scenario} not supported.")
 
     env.add_module(
         Agents(
-            n_hiders + n_seekers,
+            n_rescuers + n_seekers + 1,
             placement_fn=agent_placement_fn,
-            color=[np.array((66.0, 235.0, 244.0, 255.0)) / 255] * n_hiders
-            + [(1.0, 0.0, 0.0, 1.0)] * n_seekers,
+            color=[np.array((66.0, 235.0, 244.0, 255.0)) / 255] * n_rescuers
+            + [(0.0, 1.0, 0.0, 1.0)] * n_seekers
+            + [np.array((1.0, 0.0, 0.0, 1.0))],
             friction=other_friction,
             polar_obs=polar_obs,
         )
@@ -467,7 +421,7 @@ def make_env(
     if n_lidar_per_agent > 0 and visualize_lidar:
         env.add_module(
             LidarSites(
-                n_agents=n_hiders + n_seekers, n_lidar_per_agent=n_lidar_per_agent
+                n_agents=n_rescuers + n_seekers, n_lidar_per_agent=n_lidar_per_agent
             )
         )
     if n_food > 0:
@@ -503,26 +457,37 @@ def make_env(
         env.add_module(FloorAttributes(friction=box_floor_friction))
     env.add_module(WorldConstants(gravity=gravity))
     env.reset()
-    keys_self = ["agent_qpos_qvel", "hider", "prep_obs"]
+    keys_self = [
+        "agent_qpos_qvel",
+        "is_rescuer",
+        "model_id",
+        "vision_range",
+        "lidar_range",
+    ]
     keys_mask_self = ["mask_aa_obs"]
     keys_external = ["agent_qpos_qvel"]
     keys_copy = ["you_lock", "team_lock", "ramp_you_lock", "ramp_team_lock"]
     keys_mask_external = []
+    agent_types = [
+        {"is_rescuer": True, "view_range": 5, "has_lidar": True, "model_id": 0},
+        {"is_rescuer": False, "view_range": 10, "has_lidar": True, "model_id": 1},
+    ]
     env = SplitMultiAgentActions(env)
-    if team_size_obs:
-        keys_self += ["team_size"]
-    env = TeamMembership(env, np.append(np.zeros((n_hiders,)), np.ones((n_seekers,))))
+    env = AgentType(env, agent_types)
+    # if team_size_obs:
+    #     keys_self += ["team_size"]
+    # env = TeamMembership(env, np.append(np.zeros((n_hiders,)), np.ones((n_seekers,))))
     env = AgentAgentObsMask2D(env)
-    hider_obs = np.array([[1]] * n_hiders + [[0]] * n_seekers)
-    env = AddConstantObservationsWrapper(env, new_obs={"hider": hider_obs})
-    env = HideAndSeekRewardWrapper(
-        env, n_hiders=n_hiders, n_seekers=n_seekers, rew_type=rew_type
+    is_rescuer_obs = np.array([d["is_rescuer"] for d in agent_types])
+    env = AddConstantObservationsWrapper(env, new_obs={"is_rescuer": is_rescuer_obs})
+    env = SearchAndRescueRewardWrapper(
+        env, n_rescuers=n_rescuers, n_seekers=n_seekers, rew_type=rew_type
     )
     if restrict_rect is not None:
         env = RestrictAgentsRect(
             env, restrict_rect=restrict_rect, penalize_objects_out=penalize_objects_out
         )
-    env = PreparationPhase(env, prep_fraction=prep_fraction)
+    # env = PreparationPhase(env, prep_fraction=prep_fraction)
     env = DiscretizeActionWrapper(env, "action_movement")
     if np.max(n_boxes) > 0:
         env = AgentGeomObsMask2D(
@@ -552,7 +517,7 @@ def make_env(
             env = MaskPrepPhaseAction(env, "action_eat_food")
         if not eat_when_caught:
             env = MaskUnseenAction(env, 0, "action_eat_food")
-        eat_agents = np.arange(n_hiders)
+        eat_agents = np.arange(n_rescuers)
         env = AlwaysEatWrapper(env, agent_idx_allowed=eat_agents)
         keys_external += ["mask_af_obs", "food_obs"]
         keys_mask_external.append("mask_af_obs")
@@ -560,7 +525,7 @@ def make_env(
         env = LockObjWrapper(
             env,
             body_names=[f"moveable_box{i}" for i in range(np.max(n_boxes))],
-            agent_idx_allowed_to_lock=np.arange(n_hiders + n_seekers),
+            agent_idx_allowed_to_lock=np.arange(n_rescuers + n_seekers),
             lock_type=lock_type,
             radius_multiplier=lock_radius_multiplier,
             obj_in_game_metadata_keys=["curr_n_boxes"],
@@ -577,7 +542,7 @@ def make_env(
             env = LockObjWrapper(
                 env,
                 body_names=[f"ramp{i}:ramp" for i in range(n_ramps)],
-                agent_idx_allowed_to_lock=np.arange(n_hiders + n_seekers),
+                agent_idx_allowed_to_lock=np.arange(n_rescuers + n_seekers),
                 lock_type=lock_type,
                 ac_obs_prefix="ramp_",
                 radius_multiplier=lock_radius_multiplier,
@@ -603,6 +568,7 @@ def make_env(
             env,
             n_lidar_per_agent=n_lidar_per_agent,
             visualize_lidar=visualize_lidar,
+            lidar_range=[agent.get("lidar_range", 6) for agent in agent_types],
             compress_lidar_scale=compress_lidar_scale,
         )
         keys_copy += ["lidar"]
@@ -638,12 +604,18 @@ def make_env(
         )
     if not grab_selective and grab_box:
         env = GrabClosestWrapper(env)
-    env = NoActionsInPrepPhase(env, np.arange(n_hiders, n_hiders + n_seekers))
+    # env = NoActionsInPrepPhase(env, np.arange(n_rescuxers, n_rescuers + n_seekers))
     env = DiscardMujocoExceptionEpisodes(env)
     env = ConcatenateObsWrapper(
         env,
         {
-            "agent_qpos_qvel": ["agent_qpos_qvel", "hider", "prep_obs"],
+            "agent_qpos_qvel": [
+                "agent_qpos_qvel",
+                "is_rescuer",
+                "model_id",
+                "vision_range",
+                "lidar_range",
+            ],
             "box_obs": ["box_obs", "you_lock", "team_lock", "obj_lock"],
             "ramp_obs": ["ramp_obs"]
             + (

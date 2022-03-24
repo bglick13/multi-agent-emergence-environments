@@ -6,20 +6,27 @@ from mae_envs.wrappers.util import update_obs_space
 
 
 class Lidar(gym.ObservationWrapper):
-    '''
-        Creates LIDAR-type observations based on Mujoco raycast
+    """
+    Creates LIDAR-type observations based on Mujoco raycast
 
-        Args:
-            n_lidar_per_agent (int): Number of concentric lidar rays per agent
-            lidar_range (float): Maximum range of lidar
-            compress_lidar_scale (float): Scale for non-linear compression of
-                lidar range
-            visualize_lidar (bool): If true, visualize lidar using thin cylinders
-                representing lidar rays (requires environment to create corresponding
-                sites)
-    '''
-    def __init__(self, env, n_lidar_per_agent=30, lidar_range=6.0,
-                 compress_lidar_scale=None, visualize_lidar=False):
+    Args:
+        n_lidar_per_agent (int): Number of concentric lidar rays per agent
+        lidar_range (float): Maximum range of lidar
+        compress_lidar_scale (float): Scale for non-linear compression of
+            lidar range
+        visualize_lidar (bool): If true, visualize lidar using thin cylinders
+            representing lidar rays (requires environment to create corresponding
+            sites)
+    """
+
+    def __init__(
+        self,
+        env,
+        n_lidar_per_agent=30,
+        lidar_range=6.0,
+        compress_lidar_scale=None,
+        visualize_lidar=False,
+    ):
         super().__init__(env)
         self.n_lidar_per_agent = n_lidar_per_agent
         self.lidar_range = lidar_range
@@ -28,14 +35,39 @@ class Lidar(gym.ObservationWrapper):
         self.n_agents = self.unwrapped.n_agents
 
         self.observation_space = update_obs_space(
-            env, {'lidar': (self.n_agents, self.n_lidar_per_agent, 1)})
+            env, {"lidar": (self.n_agents, self.n_lidar_per_agent, 1)}
+        )
 
         # generate concentric lidar rays centered at origin
-        self.lidar_angles = np.linspace(0, 2*np.pi, num=self.n_lidar_per_agent, endpoint=False)
-        self.lidar_rays = self.lidar_range * np.array([np.cos(self.lidar_angles),
-                                                       np.sin(self.lidar_angles),
-                                                       np.zeros_like(self.lidar_angles)]).T
-        self.lidar_rays = self.lidar_rays[None, :]
+        self.lidar_angles = np.linspace(
+            0, 2 * np.pi, num=self.n_lidar_per_agent, endpoint=False
+        )
+        if isinstance(lidar_range, list):
+            self.lidar_rays = np.array(
+                [
+                    lr
+                    * np.array(
+                        [
+                            np.cos(self.lidar_angles),
+                            np.sin(self.lidar_angles),
+                            np.zeros_like(self.lidar_angles),
+                        ]
+                    ).T
+                    for lr in self.lidar_range
+                ]
+            )
+        else:
+            self.lidar_rays = (
+                self.lidar_range
+                * np.array(
+                    [
+                        np.cos(self.lidar_angles),
+                        np.sin(self.lidar_angles),
+                        np.zeros_like(self.lidar_angles),
+                    ]
+                ).T
+            )
+            self.lidar_rays = self.lidar_rays[None, :]
 
     def reset(self):
         obs = self.env.reset()
@@ -43,25 +75,38 @@ class Lidar(gym.ObservationWrapper):
         sim = self.unwrapped.sim
 
         # Cache ids
-        self.agent_body_ids = np.array([sim.model.body_name2id(f"agent{i}:particle")
-                                        for i in range(self.n_agents)])
-        self.agent_geom_ids = np.array([sim.model.geom_name2id(f'agent{i}:agent')
-                                        for i in range(self.n_agents)])
+        self.agent_body_ids = np.array(
+            [sim.model.body_name2id(f"agent{i}:particle") for i in range(self.n_agents)]
+        )
+        self.agent_geom_ids = np.array(
+            [sim.model.geom_name2id(f"agent{i}:agent") for i in range(self.n_agents)]
+        )
 
         if self.visualize_lidar:
-            self.lidar_ids = np.array([[sim.model.site_name2id(f"agent{i}:lidar{j}")
-                                        for j in range(self.n_lidar_per_agent)]
-                                       for i in range(self.n_agents)])
+            self.lidar_ids = np.array(
+                [
+                    [
+                        sim.model.site_name2id(f"agent{i}:lidar{j}")
+                        for j in range(self.n_lidar_per_agent)
+                    ]
+                    for i in range(self.n_agents)
+                ]
+            )
 
         return self.observation(obs)
 
     def place_lidar_ray_markers(self, agent_pos, lidar_endpoints):
         sim = self.unwrapped.sim
 
-        site_offset = sim.data.site_xpos[self.lidar_ids, :] - sim.model.site_pos[self.lidar_ids, :]
+        site_offset = (
+            sim.data.site_xpos[self.lidar_ids, :]
+            - sim.model.site_pos[self.lidar_ids, :]
+        )
 
         # compute location of lidar rays
-        sim.model.site_pos[self.lidar_ids, :] = .5 * (agent_pos[:, None, :] + lidar_endpoints) - site_offset
+        sim.model.site_pos[self.lidar_ids, :] = (
+            0.5 * (agent_pos[:, None, :] + lidar_endpoints) - site_offset
+        )
 
         # compute length of lidar rays
         rel_vec = lidar_endpoints - agent_pos[:, None, :]
@@ -99,21 +144,28 @@ class Lidar(gym.ObservationWrapper):
         lidar = np.zeros((self.n_agents, self.n_lidar_per_agent))
         for i in range(self.n_agents):
             for j in range(self.n_lidar_per_agent):
-                lidar[i, j] = raycast(sim, geom1_id=self.agent_geom_ids[i],
-                                      pt2=lidar_endpoints[i, j], geom_group=None)[0]
+                lidar[i, j] = raycast(
+                    sim,
+                    geom1_id=self.agent_geom_ids[i],
+                    pt2=lidar_endpoints[i, j],
+                    geom_group=None,
+                )[0]
 
         lidar[lidar < 0.0] = self.lidar_range
 
         if self.compress_lidar_scale is not None:
-            obs['lidar'] = (self.compress_lidar_scale *
-                            np.tanh(lidar[..., None] / self.compress_lidar_scale))
+            obs["lidar"] = self.compress_lidar_scale * np.tanh(
+                lidar[..., None] / self.compress_lidar_scale
+            )
         else:
-            obs['lidar'] = lidar[..., None]
+            obs["lidar"] = lidar[..., None]
 
         if self.visualize_lidar:
             # recalculate lidar endpoints
-            lidar_endpoints = agent_pos[:, None, :] + \
-                    lidar[:, :, None] / self.lidar_range * self.lidar_rays
+            lidar_endpoints = (
+                agent_pos[:, None, :]
+                + lidar[:, :, None] / self.lidar_range * self.lidar_rays
+            )
             self.place_lidar_ray_markers(agent_pos, lidar_endpoints)
             sim.model.site_rgba[self.lidar_ids, :] = np.array([0.0, 0.0, 1.0, 0.2])
             sim.forward()
