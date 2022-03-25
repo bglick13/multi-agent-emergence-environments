@@ -34,12 +34,31 @@ class AgentType(gym.ObservationWrapper):
         # make sure we copy value of team_index if it's a numpy array
         self.metadata["agent_types"] = agent_specs
         self.observation_space = update_obs_space(
-            env, {"team_size": (self.n_agents, 1)}
+            env,
+            {
+                "lidar_range": (self.n_agents, 1),
+                "view_range": (self.n_agents, 1),
+                "model_type": (self.n_agents, 1),
+            },
         )
-        self.observation_space = update_obs_space(env, {"model_id": (self.n_agents, 1)})
 
     def observation(self, obs):
         obs["model_type"] = np.array(
-            [self.metadata["agent_types"][i]["model_id"] for i in range(self.n_agents)]
+            [
+                [self.metadata["agent_types"][i]["model_id"]]
+                for i in range(self.n_agents)
+            ]
+        )
+        obs["lidar_range"] = np.array(
+            [
+                [self.metadata["agent_types"][i]["lidar_range"]]
+                for i in range(self.n_agents)
+            ]
+        )
+        obs["view_range"] = np.array(
+            [
+                [self.metadata["agent_types"][i]["view_range"]]
+                for i in range(self.n_agents)
+            ]
         )
         return obs

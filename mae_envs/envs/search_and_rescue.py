@@ -176,9 +176,11 @@ class SearchAndRescueRewardWrapper(gym.Wrapper):
         self.metadata["n_seekers"] = n_seekers
 
         # Agent names are used to plot agent-specific rewards on tensorboard
-        self.unwrapped.agent_names = [f"rescuer{i}" for i in range(self.n_rescuers)] + [
-            f"seeker{i}" for i in range(self.n_seekers) + ["lost_hiker"]
-        ]
+        self.unwrapped.agent_names = (
+            [f"rescuer{i}" for i in range(self.n_rescuers)]
+            + [f"seeker{i}" for i in range(self.n_seekers)]
+            + ["lost_hiker"]
+        )
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
@@ -301,7 +303,7 @@ def make_env(
     lock_radius_multiplier = lock_grab_radius / box_size
 
     env = Base(
-        n_agents=len(agent_types) + 1,
+        n_agents=len(agent_types),
         n_substeps=n_substeps,
         horizon=horizon,
         floor_size=floor_size,
@@ -309,8 +311,8 @@ def make_env(
         action_lims=action_lims,
         deterministic_mode=deterministic_mode,
     )
-    n_rescuers = np.sum([1 for a in agent_types if a["rescuer"]])
-    n_seekers = np.sum([1 for a in agent_types if not a["rescuer"]])
+    n_rescuers = np.sum([1 for a in agent_types if a["type"] == "rescuer"])
+    n_seekers = np.sum([1 for a in agent_types if a["type"] == "seeker"])
     n_lost_hiker = 1
 
     if scenario == "randomwalls":
@@ -460,25 +462,24 @@ def make_env(
     keys_self = [
         "agent_qpos_qvel",
         "is_rescuer",
-        "model_id",
-        "vision_range",
+        "model_type",
+        "view_range",
         "lidar_range",
     ]
     keys_mask_self = ["mask_aa_obs"]
     keys_external = ["agent_qpos_qvel"]
     keys_copy = ["you_lock", "team_lock", "ramp_you_lock", "ramp_team_lock"]
     keys_mask_external = []
-    agent_types = [
-        {"is_rescuer": True, "view_range": 5, "has_lidar": True, "model_id": 0},
-        {"is_rescuer": False, "view_range": 10, "has_lidar": True, "model_id": 1},
-    ]
+
     env = SplitMultiAgentActions(env)
     env = AgentType(env, agent_types)
     # if team_size_obs:
     #     keys_self += ["team_size"]
-    # env = TeamMembership(env, np.append(np.zeros((n_hiders,)), np.ones((n_seekers,))))
+    env = TeamMembership(
+        env, np.append(np.zeros((n_rescuers + n_seekers,)), np.ones((1,)))
+    )
     env = AgentAgentObsMask2D(env)
-    is_rescuer_obs = np.array([d["is_rescuer"] for d in agent_types])
+    is_rescuer_obs = np.array([[d["is_rescuer"]] for d in agent_types])
     env = AddConstantObservationsWrapper(env, new_obs={"is_rescuer": is_rescuer_obs})
     env = SearchAndRescueRewardWrapper(
         env, n_rescuers=n_rescuers, n_seekers=n_seekers, rew_type=rew_type
@@ -612,8 +613,8 @@ def make_env(
             "agent_qpos_qvel": [
                 "agent_qpos_qvel",
                 "is_rescuer",
-                "model_id",
-                "vision_range",
+                "model_type",
+                "view_range",
                 "lidar_range",
             ],
             "box_obs": ["box_obs", "you_lock", "team_lock", "obj_lock"],
