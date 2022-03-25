@@ -28,7 +28,7 @@ if __name__ == "__main__":
             "is_rescuer": True,
             "view_range": 5,
             "has_lidar": True,
-            "lidar_range": 6,
+            "lidar_range": 2,
             "model_id": 0,
             "type": "rescuer",
         },
@@ -44,17 +44,22 @@ if __name__ == "__main__":
             "is_rescuer": False,
             "view_range": 0,
             "has_lidar": False,
-            "lidar_range": 0,
+            "lidar_range": 0.1,
             "model_id": -1,
             "type": "hiker",
         },
     ]
-    env = make_env(agent_types=agent_types)
+    env = make_env(agent_types=agent_types, visualize_lidar=True, n_lidar_per_agent=30)
     done = False
     obs = env.reset()
     # obs dim (n_agents, )
     while not done:
-        action = np.random.randint(0, 11, size=(env.n_agents, 3))
+        action = np.random.randint(0, 11, size=(env.unwrapped.n_agents, 3))
+        action = {
+            "action_movement": action,
+            "action_pull": np.zeros(env.unwrapped.n_agents),
+            "action_glueall": np.zeros(env.unwrapped.n_agents),
+        }
         obs, reward, done, info = env.step(action)
         env.render()
         print(action)

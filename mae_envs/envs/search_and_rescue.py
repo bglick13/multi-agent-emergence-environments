@@ -277,7 +277,7 @@ def make_env(
     random_room_number=True,
     prob_outside_walls=1.0,
     n_lidar_per_agent=0,
-    visualize_lidar=False,
+    visualize_lidar=True,
     compress_lidar_scale=None,
     hiders_together_radius=None,
     seekers_together_radius=None,
@@ -423,7 +423,7 @@ def make_env(
     if n_lidar_per_agent > 0 and visualize_lidar:
         env.add_module(
             LidarSites(
-                n_agents=n_rescuers + n_seekers, n_lidar_per_agent=n_lidar_per_agent
+                n_agents=n_rescuers + n_seekers + 1, n_lidar_per_agent=n_lidar_per_agent
             )
         )
     if n_food > 0:
@@ -526,7 +526,7 @@ def make_env(
         env = LockObjWrapper(
             env,
             body_names=[f"moveable_box{i}" for i in range(np.max(n_boxes))],
-            agent_idx_allowed_to_lock=np.arange(n_rescuers + n_seekers),
+            agent_idx_allowed_to_lock=np.arange(n_rescuers + n_seekers + 1),
             lock_type=lock_type,
             radius_multiplier=lock_radius_multiplier,
             obj_in_game_metadata_keys=["curr_n_boxes"],
@@ -543,7 +543,7 @@ def make_env(
             env = LockObjWrapper(
                 env,
                 body_names=[f"ramp{i}:ramp" for i in range(n_ramps)],
-                agent_idx_allowed_to_lock=np.arange(n_rescuers + n_seekers),
+                agent_idx_allowed_to_lock=np.arange(n_rescuers + n_seekers + 1),
                 lock_type=lock_type,
                 ac_obs_prefix="ramp_",
                 radius_multiplier=lock_radius_multiplier,

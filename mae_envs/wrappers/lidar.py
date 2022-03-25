@@ -150,8 +150,11 @@ class Lidar(gym.ObservationWrapper):
                     pt2=lidar_endpoints[i, j],
                     geom_group=None,
                 )[0]
-
-        lidar[lidar < 0.0] = self.lidar_range
+        if isinstance(self.lidar_range, list):
+            for i in range(self.n_agents):
+                lidar[i, lidar[i] < 0] = self.lidar_range[i]
+        else:
+            lidar[lidar < 0.0] = self.lidar_range
 
         if self.compress_lidar_scale is not None:
             obs["lidar"] = self.compress_lidar_scale * np.tanh(
