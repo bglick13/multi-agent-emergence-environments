@@ -31,7 +31,7 @@ class CaptainAgent():
         self.solver.backup(leaf, value)
         return leaf
 
-    def get_action(self, state, num_reads=100, action=-1, deterministic=False):
+    def get_action(self, state, num_reads=100, action=-1, random=False):
         if self.solver is None:
             self.root = SearchNode(state, action)
             self.solver = SearchProblem(self.root)
@@ -50,7 +50,7 @@ class CaptainAgent():
         nn_probs, nn_value, _ = self.get_preds(successor, plot_attn=True)
 
         p = F.softmax(FloatTensor(values), -1).numpy()
-        if not deterministic:
+        if random:
             action = np.random.choice(range(len(values)), p=p)
         else:
             top5 = values.argsort()[-5:]
