@@ -1,6 +1,7 @@
 import warnings
 from enum import Enum
 from typing import Union
+from IPython import embed
 
 import numpy as np
 import pandas as pd
@@ -13,23 +14,43 @@ from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 
-class AlphaBert(torch.nn.module):
-    def __init__(self, embedding_dim, ff_dim, n_head, n_encoder_layers, out_ff_dim, mask_idx):
+def swish(x):
+    return F.sigmoid(x) * x
+
+
+class Swish(torch.nn.Module):
+    def __init__(self):
         super().__init__()
+
+    def forward(self, x):
+        return F.sigmoid(x) * x
+
+class AlphaBert(torch.nn.Module):
+    def __init__(self, input_dim, embedding_dim, ff_dim, n_head, n_encoder_layers, out_ff_dim, n_actions):
+        super().__init__()
+        self.input_dim = input_dim
         self.embedding_dim = embedding_dim
         self.n_head = n_head
         self.n_encoder_layers = n_encoder_layers
 
-        self.embedding_layer = torch.nn.Sequential(torch.nn.Linear(embedding_dim, embedding_dim), torch.nn.LayerNorm(embedding_dim), Swish())
+        # self.embedding_layer = torch.nn.Embedding(input_dim, embedding_dim)
+        self.embedding_layer = torch.nn.Sequential(torch.nn.Linear(input_dim, embedding_dim), torch.nn.LayerNorm(embedding_dim), Swish())
 
-        self.n_encoder_layer = torch.nn.TransformerEncoderLayer(embedding_dim, n_head, dim_feedforward=ff_dim, dropout=0.2)
+        self.encoder_layer = torch.nn.TransformerEncoderLayer(embedding_dim, n_head, dim_feedforward=ff_dim, dropout=0.2)
         self.encoder = torch.nn.TransformerEncoder(self.encoder_layer, n_encoder_layers)
 
-        self.move_x_layer = torch.nn.Sequential(torch.nn.Linear(ff_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
-        self.move_y_layer = torch.nn.Sequential(torch.nn.Linear(ff_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
-        self.move_z_layer = torch.nn.Sequential(torch.nn.Linear(ff_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
+        self.next_x_out = torch.nn.Linear(out_ff_dim, n_actions)
+        self.next_x_hidden = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
+        self.next_x_output = torch.nn.Sequential(self.next_x_hidden, self.next_x_out)
 
-        self.pe = PositionalEncoding(embedding_dim, 0, max_len=n_encoder_layers)
+        self.next_y_out = torch.nn.Linear(out_ff_dim, n_actions)
+        self.next_y_hidden = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
+        self.next_y_output = torch.nn.Sequential(self.next_y_hidden, self.next_y_out)
+
+        self.next_z_out = torch.nn.Linear(out_ff_dim, n_actions)
+        self.next_z_hidden = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
+        self.next_z_output = torch.nn.Sequential(self.next_z_hidden, self.next_z_out)
+
 
         self.sep = None
         self.cls = None
@@ -46,7 +67,7 @@ class AlphaBert(torch.nn.module):
         return self.embedding_layer(observations)
 
 
-    def get_attn_maps(self, src: torch.LongTensor):
+    def get_attn_maps(self, src: torch.FloatTensor):
         src = self.embedding_layer(src)
         src = src + np.sqrt(self.embedding_dim)
 
@@ -58,26 +79,28 @@ class AlphaBert(torch.nn.module):
         return attn_maps
 
 
-    def forward(self, src: torch.LongTensor):
+    def forward(self, src: torch.FloatTensor):
         src = self.embedding_layer(src)
         src = src + np.sqrt(self.embedding_dim)
-        src = src.permute(1, 0, 2)
+        out = self.encoder(src)
+        return out
 
 
-    def get_next_action(self, x):
+    def get_next_action_output(self, x):
         next_action = []
-        next_action.append(np.argmax(np.softmax(self.move_x_layer(x))))
-        next_action.append(np.argmax(np.softmax(self.move_x_layer(y))))
-        next_action.append(np.argmax(np.softmax(self.move_x_layer(z))))
+        for i in range(self.encoder.num_layers):
+            output = [self.next_x_output(x[i]).detach().numpy(),
+                      self.next_y_output(x[i]).detach().numpy(),
+                      self.next_z_output(x[i]).detach().numpy()]
+            next_action.append(output)
         return np.array(next_action)
 
+def main():
+    obs = torch.FloatTensor(np.random.randint(1, 10, (2, 10)))
+    model = AlphaBert(10, 64, 2048, 2, 2, 128, 11)
+    x = model.forward(obs)
+    x = model.get_next_action_output(x)
+    print(x)
 
-    def predict(self, src: torch.LongTensor, mask: torch.BoolTensor, task: AlphaBertTasks, **predict_kwargs):
-
-        if isinstance(src, (list, np.ndarry)):
-            src = torch.LongTensor(src)
-        if isinstance(mask, (list, np.ndarray)):
-            mask = torch.BoolTensor(mask)
-        self.eval()
-
-        if task == AlphaBertTasks.
+if __name__ == '__main__':
+    main()
