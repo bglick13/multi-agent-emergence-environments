@@ -51,6 +51,7 @@ class AlphaBert(torch.nn.Module):
         self.next_z_hidden = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
         self.next_z_output = torch.nn.Sequential(self.next_z_hidden, self.next_z_out)
 
+        self.value_output = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish(), torch.nn.Linear(out_ff_dim, n_actions))
 
         self.sep = None
         self.cls = None
@@ -70,8 +71,6 @@ class AlphaBert(torch.nn.Module):
     def get_attn_maps(self, src: torch.FloatTensor):
         src = self.embedding_layer(src)
         src = src + np.sqrt(self.embedding_dim)
-
-        src = src.permute(1, 0, 2)
         attn_maps = []
         for i in range(self.n_encoder_layers):
             output = self.encoder.layers[i].self_attn(src, src, src, need_weights=True)
@@ -95,12 +94,19 @@ class AlphaBert(torch.nn.Module):
             next_action.append(output)
         return np.array(next_action)
 
+    def get_value_output(self, x):
+        return self.value_output(x)
+
+
 def main():
     obs = torch.FloatTensor(np.random.randint(1, 10, (2, 10)))
     model = AlphaBert(10, 64, 2048, 2, 2, 128, 11)
     x = model.forward(obs)
-    x = model.get_next_action_output(x)
-    print(x)
+    a = model.get_next_action_output(x)
+    v = model.get_value_output(x)
+    print(a)
+    print(v)
+    embed()
 
 if __name__ == '__main__':
     main()
