@@ -68,7 +68,7 @@ class CaptainAgent():
         s_in.requires_grad = False
         encoded_s = self.model.forward(s_in)
         probs = self.model.get_next_action_output(encoded_s) # n_agents x 3 x 11
-        probs = F.softmax(torch.FloatTensor(probs)).detach().cpu().numpy()
+        probs = F.softmax(torch.FloatTensor(probs), dim=2).detach().cpu().numpy()
         value = F.softmax(self.model.get_value_output(encoded_s)).detach().cpu().numpy()
         return probs, value
 

@@ -51,7 +51,7 @@ class AlphaBert(torch.nn.Module):
         self.next_z_hidden = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish())
         self.next_z_output = torch.nn.Sequential(self.next_z_hidden, self.next_z_out)
 
-        self.value_output = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish(), torch.nn.Linear(out_ff_dim, n_actions))
+        self.value_output = torch.nn.Sequential(torch.nn.Linear(embedding_dim, out_ff_dim), torch.nn.LayerNorm(out_ff_dim), Swish(), torch.nn.Linear(out_ff_dim, 1))
 
         self.sep = None
         self.cls = None
@@ -99,14 +99,14 @@ class AlphaBert(torch.nn.Module):
 
 
 def main():
-    obs = torch.FloatTensor(np.random.randint(1, 10, (2, 10)))
+    obs = torch.FloatTensor([np.random.randint(1, 10, (2, 10))])
     model = AlphaBert(10, 64, 2048, 2, 2, 128, 11)
-    x = model.forward(obs)
+    x = model.forward(obs)[0]
     a = model.get_next_action_output(x)
     v = model.get_value_output(x)
     print(a)
     print(v)
-    embed()
+    # embed()
 
 if __name__ == '__main__':
     main()
